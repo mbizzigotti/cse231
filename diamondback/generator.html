@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Diamondback Program Generator</title>
+  <style>
+    body {
+      font-family: monospace;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 0 20px;
+      background: #1e1e1e;
+      color: #d4d4d4;
+    }
+    h1 { color: #569cd6; font-size: 1.4em; }
+    .label { color: #6a9955; margin-bottom: 8px; font-size: 0.85em; }
+    #prog {
+      background: #252526;
+      border: 1px solid #3c3c3c;
+      border-radius: 4px;
+      padding: 20px;
+      white-space: pre-wrap;
+      font-size: 0.95em;
+      line-height: 1.6;
+      min-height: 100px;
+      color: #ce9178;
+    }
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 14px;
+      flex-wrap: wrap;
+    }
+    button {
+      background: #0e639c;
+      color: white;
+      border: none;
+      padding: 10px 22px;
+      font-family: monospace;
+      font-size: 1em;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover { background: #1177bb; }
+    #run-btn { background: #2d7a2d; }
+    #run-btn:hover { background: #3a9a3a; }
+    #dl-btn { background: #6b3fa0; }
+    #dl-btn:hover { background: #8250c8; }
+    .input-wrap { display: flex; align-items: center; gap: 8px; }
+    .input-wrap label { color: #9cdcfe; font-size: 0.9em; }
+    .input-wrap input {
+      background: #3c3c3c;
+      border: 1px solid #555;
+      border-radius: 4px;
+      color: #d4d4d4;
+      font-family: monospace;
+      font-size: 0.95em;
+      padding: 6px 10px;
+      width: 80px;
+    }
+    #result-section { margin-top: 20px; }
+    #result-box {
+      background: #1a1a2e;
+      border: 1px solid #3c3c3c;
+      border-radius: 4px;
+      padding: 16px 20px;
+      white-space: pre-wrap;
+      font-size: 0.95em;
+      line-height: 1.6;
+      min-height: 40px;
+    }
+    .ok  { color: #4ec94e; }
+    .err { color: #f44747; }
+    .printed { color: #dcdcaa; }
+  </style>
+</head>
+<body>
+  <h1>Diamondback Program Generator</h1>
+  <a href="batch.html" style="color:#569cd6;font-size:0.85em">→ batch test generator</a>
+  <div class="label">; randomly generated diamondback program</div>
+  <div id="prog"></div>
+  <div class="controls">
+    <button onclick="generate()">Generate</button>
+    <button id="run-btn" onclick="run()">Run</button>
+    <button id="dl-btn" onclick="downloadTest()">Download test</button>
+    <div class="input-wrap">
+      <label>input =</label>
+      <input id="input-val" type="number" value="0">
+    </div>
+    <div class="input-wrap">
+      <label>size =</label>
+      <input id="size-val" type="range" min="5" max="100" value="20"
+             oninput="document.getElementById('size-display').textContent=this.value"
+             style="width:120px;accent-color:#0e639c">
+      <span id="size-display">20</span>
+    </div>
+  </div>
+
+  <div id="result-section" style="display:none">
+    <div class="label" style="margin-top:20px">; output</div>
+    <div id="result-box"></div>
+  </div>
+
+  <script src="reference.js"></script>
+  <script>
+    // ─── Generator ────────────────────────────────────────────────────────────
+
+    const T_INT = 'int', T_BOOL = 'bool', T_ANY = 'any';
+    let funCounter = 0;
+    function freshFun() { return `f${++funCounter}`; }
+
+    function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+    function rand(lo, hi) { return Math.floor(Math.random() * (hi - lo + 1)) + lo; }
+
+    let varCounter = 0;
+    function freshVar() { return `v${++varCounter}`; }
+
+    // Shared budget: decremented on each compound node; forces a leaf when exhausted.
+    let budget = 0;
+
+    // env:  Map<name, type>
+    // funs: Map<name, {params:[{name,type}], retType}>
+    // want: T_INT | T_BOOL | T_ANY
+    function genExpr(env, want, allowInput, funs) {
+      if (budget <= 0) return genLeaf(env, want, allowInput);
+      budget--;
+
+      const forms = ['let', 'if', 'block', 'loop'];
+
+      const setTargets = [...env.entries()].filter(([, t]) => want === T_ANY || t === want);
+      if (setTargets.length > 0) forms.push('set!');
+
+      if (want === T_INT || want === T_ANY)
+        forms.push('add1', 'sub1', 'print_int', '+', '-', '*');
+      if (want === T_BOOL || want === T_ANY)
+        forms.push('isnum', 'isbool', 'print_bool', '<', '>', '>=', '<=', 'eq');
+
+      for (const [name, fn] of funs)
+        if (want === T_ANY || fn.retType === want) forms.push(`call:${name}`);
+
+      const choice = pick(forms);
+
+      switch (choice) {
+        case 'let': {
+          const n = rand(1, 3);
+          const parts = [];
+          const newEnv = new Map(env);
+          for (let i = 0; i < n; i++) {
+            const vt = pick([T_INT, T_BOOL]);
+            const vn = freshVar();
+            parts.push(`(${vn} ${genExpr(newEnv, vt, allowInput, funs)})`);
+            newEnv.set(vn, vt);
+          }
+          return `(let (${parts.join(' ')}) ${genExpr(newEnv, want, allowInput, funs)})`;
+        }
+        case 'if':
+          return `(if ${genExpr(env, T_BOOL, allowInput, funs)} ` +
+                     `${genExpr(env, want, allowInput, funs)} ` +
+                     `${genExpr(env, want, allowInput, funs)})`;
+        case 'block': {
+          const n = rand(1, 3);
+          const exprs = Array.from({length: n}, () => genExpr(env, T_ANY, allowInput, funs));
+          exprs.push(genExpr(env, want, allowInput, funs));
+          return `(block ${exprs.join(' ')})`;
+        }
+        case 'loop':
+          return genLoop(env, want, allowInput, funs);
+        case 'set!': {
+          const [varName, varType] = pick(setTargets);
+          return `(set! ${varName} ${genExpr(env, varType, allowInput, funs)})`;
+        }
+        case 'add1':       return `(add1 ${genExpr(env, T_INT, allowInput, funs)})`;
+        case 'sub1':       return `(sub1 ${genExpr(env, T_INT, allowInput, funs)})`;
+        case 'print_int':  return `(print ${genExpr(env, T_INT, allowInput, funs)})`;
+        case 'print_bool': return `(print ${genExpr(env, T_BOOL, allowInput, funs)})`;
+        case 'isnum':      return `(isnum ${genExpr(env, T_ANY, allowInput, funs)})`;
+        case 'isbool':     return `(isbool ${genExpr(env, T_ANY, allowInput, funs)})`;
+        case '+': case '-': case '*':
+          return `(${choice} ${genExpr(env, T_INT, allowInput, funs)} ${genExpr(env, T_INT, allowInput, funs)})`;
+        case '<': case '>': case '>=': case '<=':
+          return `(${choice} ${genExpr(env, T_INT, allowInput, funs)} ${genExpr(env, T_INT, allowInput, funs)})`;
+        case 'eq': {
+          const at = pick([T_INT, T_BOOL]);
+          return `(= ${genExpr(env, at, allowInput, funs)} ${genExpr(env, at, allowInput, funs)})`;
+        }
+        default: { // call:<name>
+          const name = choice.slice(5);
+          const fn = funs.get(name);
+          const args = fn.params.map(p => genExpr(env, p.type, allowInput, funs));
+          return args.length ? `(${name} ${args.join(' ')})` : `(${name})`;
+        }
+      }
+    }
+
+    function genLoop(env, want, allowInput, funs) {
+      const counter = freshVar();
+      const limit = rand(1, 6);
+      const newEnv = new Map([...env, [counter, T_INT]]);
+      const breakVal = genExpr(newEnv, want, allowInput, funs);
+      return `(let ((${counter} 0)) ` +
+               `(loop (if (>= ${counter} ${limit}) ` +
+                         `(break ${breakVal}) ` +
+                         `(set! ${counter} (add1 ${counter})))))`;
+    }
+
+    function genLeaf(env, want, allowInput) {
+      const opts = [];
+      if (want === T_INT || want === T_ANY) {
+        opts.push(() => String(rand(0, 100)));
+        if (allowInput) opts.push(() => 'input');
+      }
+      if (want === T_BOOL || want === T_ANY) {
+        opts.push(() => pick(['true', 'false']));
+      }
+      for (const [name, type] of env)
+        if (want === T_ANY || type === want) opts.push(() => name);
+      return pick(opts)();
+    }
+
+    function genSig() {
+      return {
+        name: freshFun(),
+        params: Array.from({length: rand(0, 3)}, (_, i) => ({
+          name: `p${i + 1}`,
+          type: pick([T_INT, T_BOOL]),
+        })),
+        retType: pick([T_INT, T_BOOL]),
+      };
+    }
+
+    function genBody(sig, funs) {
+      const env = new Map(sig.params.map(p => [p.name, p.type]));
+      return genExpr(env, sig.retType, false, funs);
+    }
+
+    let currentProgText = '';
+
+    function generate() {
+      varCounter = 0;
+      funCounter = 0;
+      budget = parseInt(document.getElementById('size-val').value, 10);
+
+      // Pass 1: generate all signatures so every function can call any other
+      const sigs = Array.from({length: rand(0, 3)}, genSig);
+      const funs = new Map(sigs.map(s => [s.name, { params: s.params, retType: s.retType }]));
+
+      // Pass 2: generate bodies with full funs map (excluding self to avoid infinite recursion)
+      const defns = sigs.map(sig => {
+        const funsWithoutSelf = new Map([...funs].filter(([n]) => n !== sig.name));
+        return { ...sig, body: genBody(sig, funsWithoutSelf) };
+      });
+
+      const lines = defns.map(({ name, params, body }) => {
+        const ps = params.map(p => p.name).join(' ');
+        return `(fun (${name}${ps ? ' ' + ps : ''}) ${body})`;
+      });
+      lines.push(genExpr(new Map(), T_ANY, true, funs));
+
+      currentProgText = lines.join('\n');
+      document.getElementById('input-val').value = rand(-100, 100);
+      document.getElementById('prog').textContent = currentProgText;
+      document.getElementById('result-section').style.display = 'none';
+    }
+
+    // ─── Run button ───────────────────────────────────────────────────────────
+
+    function run() {
+      const inputVal = document.getElementById('input-val').value || '0';
+      const box = document.getElementById('result-box');
+      const section = document.getElementById('result-section');
+      section.style.display = 'block';
+
+      const printed = [];
+      const origLog = console.log;
+      console.log = (...args) => printed.push(args.join(' '));
+      try {
+        const result = interpreter.run(currentProgText, inputVal);
+        let html = '';
+        for (const line of printed) {
+          html += `<span class="printed">${escHtml(line)}</span>\n`;
+        }
+        html += `<span class="ok">${escHtml(result)}</span>`;
+        box.innerHTML = html;
+      } catch(e) {
+        box.innerHTML = `<span class="err">error: ${escHtml(e.message ?? e)}</span>`;
+      } finally {
+        console.log = origLog;
+      }
+    }
+
+    function escHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // ─── Download test ────────────────────────────────────────────────────────
+
+    function downloadTest() {
+      const inputVal = document.getElementById('input-val').value || '0';
+
+      // Run the program, capturing print output
+      const printed = [];
+      const origLog = console.log;
+      console.log = (...args) => printed.push(args.join(' '));
+      let result, runErr;
+      try {
+        result = interpreter.run(currentProgText, inputVal);
+      } catch (e) {
+        runErr = e.message ?? String(e);
+      } finally {
+        console.log = origLog;
+      }
+
+      if (runErr) {
+        alert('Program errored — regenerate or fix before downloading:\n' + runErr);
+        return;
+      }
+
+      // Also update the result box so the user can see what was captured
+      const section = document.getElementById('result-section');
+      section.style.display = 'block';
+      const box = document.getElementById('result-box');
+      let html = '';
+      for (const line of printed) html += `<span class="printed">${escHtml(line)}</span>\n`;
+      html += `<span class="ok">=> ${escHtml(result)}</span>`;
+      box.innerHTML = html;
+
+      // Full stdout = each print line + final return value, no trailing newline
+      const fullOutput = [...printed, result].join('\n').replace(/\n+$/, '');
+
+      // Escape for a Rust string literal: backslashes, quotes, then newlines → \n
+      const rustExpected = fullOutput
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g,  '\\"')
+        .replace(/\n/g, '\\n');
+
+      const name  = 'gen_' + Date.now();
+      const delim = 'SNEK_' + Math.random().toString(36).slice(2, 8).toUpperCase();
+      const script = buildScript(name, inputVal, rustExpected, delim);
+
+      const blob = new Blob([script], { type: 'text/x-shellscript' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name + '.sh';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    function buildScript(name, input, rustExpected, delim) {
+      const lines = [];
+      lines.push('#!/bin/bash');
+      lines.push(`# Auto-generated Diamondback test: ${name}`);
+      lines.push('set -e', '');
+      // ${BASH_SOURCE[0]} must be a literal bash substitution, not JS interpolation
+      lines.push('SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"');
+      lines.push(`SNEK_FILE="$SCRIPT_DIR/tests/${name}.snek"`);
+      lines.push('ALL_TESTS="$SCRIPT_DIR/tests/all_tests.rs"', '');
+
+      // Embed the program as a heredoc (delimiter can't appear in valid Diamondback source)
+      lines.push(`cat > "$SNEK_FILE" << '${delim}'`);
+      lines.push(currentProgText);
+      lines.push(delim, '');
+      lines.push('echo "Wrote $SNEK_FILE"', '');
+
+      // Python script to insert the test entry into all_tests.rs
+      lines.push('python3 - "$ALL_TESTS" << \'PYEOF\'');
+      lines.push('import sys');
+      lines.push('');
+      lines.push('path = sys.argv[1]');
+      lines.push('with open(path) as f:');
+      lines.push('    content = f.read()');
+      lines.push('');
+      lines.push('entry = """    {');
+      lines.push(`        name: ${name},`);
+      lines.push(`        file: "${name}.snek",`);
+      lines.push(`        input: "${input}",`);
+      lines.push(`        expected: "${rustExpected}",`);
+      lines.push('    },"""');
+      lines.push('');
+      // In the generated Python, \n is a literal newline — matches the blank line in the file
+      lines.push("marker = '}\\n\\nruntime_error_tests'");
+      lines.push('idx = content.find(marker)');
+      lines.push('if idx == -1:');
+      lines.push('    print("Error: could not find insertion point in all_tests.rs", file=sys.stderr)');
+      lines.push('    sys.exit(1)');
+      lines.push('');
+      lines.push("content = content[:idx] + entry + '\\n' + content[idx:]");
+      lines.push('with open(path, \'w\') as f:');
+      lines.push('    f.write(content)');
+      lines.push('');
+      lines.push(`print("Added test '${name}' to", path)`);
+      lines.push('PYEOF', '');
+      lines.push(`echo "Done! Run: cargo test ${name}"`);
+
+      return lines.join('\n') + '\n';
+    }
+
+    generate();
+  </script>
+</body>
+</html>
