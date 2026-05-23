@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Diamondback Program Generator</title>
+  <title>Fer-de-Lance Program Generator</title>
   <style>
     body {
       font-family: monospace;
@@ -75,25 +75,21 @@
 </head>
 <body>
   <a href="../index.html" style="color:#569cd6;font-size:0.85em">← home</a>
-  <h1>Diamondback Program Generator</h1>
+  <h1>Fer-de-Lance Program Generator</h1>
   <a href="batch.html" style="color:#569cd6;font-size:0.85em">→ batch test generator</a>
   <div class="controls">
     <button onclick="generate()">Generate</button>
     <button id="dl-btn" onclick="downloadTest()">Download test</button>
     <div class="input-wrap">
-      <label>input =</label>
-      <input id="input-val" type="number" value="0" oninput="run()">
-    </div>
-    <div class="input-wrap">
-      <label>size =</label>
-      <input id="size-val" type="range" min="5" max="100" value="20"
-      oninput="document.getElementById('size-display').textContent=this.value"
-      style="width:120px;accent-color:#0e639c">
-      <span id="size-display">20</span>
+      <label>complexity =</label>
+      <input id="complexity-val" type="range" min="0" max="4" value="1"
+        oninput="document.getElementById('complexity-display').textContent=this.value"
+        style="width:120px;accent-color:#0e639c">
+      <span id="complexity-display">1</span>
     </div>
   </div>
   <p></p>
-  <div class="label">; randomly generated diamondback program</div>
+  <div class="label">; randomly generated fer-de-lance program</div>
   <div id="prog"></div>
 
   <div id="result-section" style="display:none">
@@ -103,66 +99,35 @@
 
   <script src="generator.js"></script>
   <script>
-    let currentProgText = '';
+    let currentProg = null; // { source, input, printed, result }
 
     function generate() {
-      const size = parseInt(document.getElementById('size-val').value, 10);
-      const { prog, input } = generateOne(size);
-      currentProgText = prog;
-      document.getElementById('input-val').value = input;
-      document.getElementById('prog').textContent = prog;
+      const c = parseInt(document.getElementById('complexity-val').value, 10) || 0;
+      currentProg = genProgram(c);
+      document.getElementById('prog').textContent = currentProg.source;
       run();
     }
 
-    let runSeq = 0;
-    async function run() {
-      const seq = ++runSeq;
-      const inputVal = document.getElementById('input-val').value || '0';
+    function run() {
+      if (!currentProg) return;
+      const section = document.getElementById('result-section');
+      section.style.display = 'block';
       const box = document.getElementById('result-box');
-      document.getElementById('result-section').style.display = 'block';
-      box.innerHTML = '<span style="color:#888">running…</span>';
-
-      try {
-        const { printed, result } = await runWithTimeout(currentProgText, inputVal);
-        if (seq !== runSeq) return;
-        let html = '';
-        for (const line of printed)
-          html += `<span class="printed">${escHtml(line)}</span>\n`;
-        html += `<span class="ok">${escHtml(result)}</span>`;
-        box.innerHTML = html;
-      } catch(e) {
-        if (seq !== runSeq) return;
-        box.innerHTML = `<span class="err">error: ${escHtml(e.message ?? e)}</span>`;
+      let html = '';
+      for (const line of currentProg.printed) {
+        html += `<span class="printed">${escHtml(line)}</span>\n`;
       }
+      html += `<span class="ok">=> ${escHtml(currentProg.result)}</span>`;
+      box.innerHTML = html;
     }
 
     function escHtml(s) {
       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
 
-    async function downloadTest() {
-      const inputVal = document.getElementById('input-val').value || '0';
-      const dlBtn = document.getElementById('dl-btn');
-      dlBtn.disabled = true;
-
-      let printed, result;
-      try {
-        ({ printed, result } = await runWithTimeout(currentProgText, inputVal));
-      } catch (e) {
-        alert('Program errored — regenerate or fix before downloading:\n' + (e.message ?? e));
-        dlBtn.disabled = false;
-        return;
-      } finally {
-        dlBtn.disabled = false;
-      }
-
-      const section = document.getElementById('result-section');
-      section.style.display = 'block';
-      const box = document.getElementById('result-box');
-      let html = '';
-      for (const line of printed) html += `<span class="printed">${escHtml(line)}</span>\n`;
-      html += `<span class="ok">=> ${escHtml(result)}</span>`;
-      box.innerHTML = html;
+    function downloadTest() {
+      if (!currentProg) return;
+      const { source, input, printed, result } = currentProg;
 
       const fullOutput = [...printed, result].join('\n').replace(/\n+$/, '');
       const rustExpected = fullOutput
@@ -172,7 +137,7 @@
 
       const name  = 'gen_' + Date.now();
       const delim = 'SNEK_' + Math.random().toString(36).slice(2, 8).toUpperCase();
-      const script = buildScript(name, inputVal, rustExpected, delim);
+      const script = buildScript(name, source, input, rustExpected, delim);
 
       const blob = new Blob([script], { type: 'text/x-shellscript' });
       const a = document.createElement('a');
@@ -182,17 +147,17 @@
       URL.revokeObjectURL(a.href);
     }
 
-    function buildScript(name, input, rustExpected, delim) {
+    function buildScript(name, source, input, rustExpected, delim) {
       const lines = [];
       lines.push('#!/bin/bash');
-      lines.push(`# Auto-generated Diamondback test: ${name}`);
+      lines.push(`# Auto-generated Fer-de-Lance test: ${name}`);
       lines.push('set -e', '');
       lines.push('SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"');
       lines.push(`SNEK_FILE="$SCRIPT_DIR/tests/${name}.snek"`);
       lines.push('ALL_TESTS="$SCRIPT_DIR/tests/all_tests.rs"', '');
 
       lines.push(`cat > "$SNEK_FILE" << '${delim}'`);
-      lines.push(currentProgText);
+      lines.push(source);
       lines.push(delim, '');
       lines.push('echo "Wrote $SNEK_FILE"', '');
 

@@ -128,11 +128,15 @@ function generateOne(size) {
   const sigs = Array.from({length: numFuns}, genSig);
   const funs = new Map(sigs.map(s => [s.name, { params: s.params, retType: s.retType }]));
 
+  const share = Math.floor(size / (numFuns + 1));
+
   const defns = sigs.map(sig => {
+    budget = share;
     const funsWithoutSelf = new Map([...funs].filter(([n]) => n !== sig.name));
     return { ...sig, body: genBody(sig, funsWithoutSelf) };
   });
 
+  budget = share;
   const lines = defns.map(({ name, params, body }) => {
     const ps = params.map(p => p.name).join(' ');
     return `(fun (${name}${ps ? ' ' + ps : ''}) ${body})`;
